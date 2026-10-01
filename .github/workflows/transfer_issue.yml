@@ -1,0 +1,33 @@
+# Opens a new issue on the linked repository from an issue in this one.
+#
+# Set variables and secrets here: https://github.com/REPONAME/issues/settings/secrets/actions
+#
+# For this workflow to work, you need to:
+#   - Set the OTHER_REPO variable
+#   - Set the MIRROR_BOT_TOKEN secret
+#   - On this repository, add a tag called "mirror-issue"
+#   - On the othe repository, add a tag called "in-game-report"
+
+name: Transfer issue workflow
+
+on:
+  issues: 
+    types: [ labeled ]
+
+jobs:
+  job:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.label.name == "mirror-issue" }}
+    steps:
+    - name: Open new issue on the linked repository
+      env:
+        GH_TOKEN: ${{ secrets.MIRROR_BOT_TOKEN }}
+        THIS_REPO: ${{ github.repository }}
+        THIS_ISSUE: ${{ github.event.issue.number }}
+        THIS_ISSUE_TITLE: ${{ github.event.issue.title }}
+        THIS_ISSUE_BODY: ${{ github.event.issue.body }}
+        OTHER_REPO: ${{ vars.OTHER_REPO }}
+        LABELS: in-game-report
+      run: |
+          new_issue_number=$(gh issue create --title "$THIS_ISSUE_TITLE" --label "$LABELS" --body "$THIS_ISSUE_BODY" --repo "$OTHER_REPO")
+          gh issue close --repo "$THIS_REPO" --comment "Mirrored to main repository! https://github.com/$OTHER_REPO/issues/$new_issue_number" "$THIS_ISSUE"
