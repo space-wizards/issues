@@ -24,10 +24,65 @@ jobs:
         GH_TOKEN: ${{ secrets.MIRROR_BOT_TOKEN }}
         THIS_REPO: ${{ github.repository }}
         THIS_ISSUE: ${{ github.event.issue.number }}
+        THIS_ISSUE_URL: ${{ github.event.issue.html_url }}
         THIS_ISSUE_TITLE: ${{ github.event.issue.title }}
         THIS_ISSUE_BODY: ${{ github.event.issue.body }}
         OTHER_REPO: ${{ vars.OTHER_REPO }}
         LABELS: in-game-report
       run: |
-          new_issue_number=$(gh issue create --title "$THIS_ISSUE_TITLE" --label "$LABELS" --body "$THIS_ISSUE_BODY" --repo "$OTHER_REPO")
-          gh issue close --repo "$THIS_REPO" --comment "Mirrored to main repository! https://github.com/$OTHER_REPO/issues/$new_issue_number" "$THIS_ISSUE"
+          bot_login=$(gh api user --jq .login)
+
+          # if current issue already have link to mirrored issue in main repo - extract it.
+          existing_issue_url=$(
+            gh issue view "$THIS_ISSUE" --repo "$THIS_REPO" --json comments |
+              jq -r --arg bot "$bot_login" '
+                [
+                  .comments[]
+                  | select(
+                      .author.login == $bot
+                      and (.body | startswith("Mirrored to main repository! "))
+                    )
+                  | .body
+                  | sub("^Mirrored to main repository! "; "")
+                ]
+                | last // empty
+              '
+          )
+
+          # If mirrored issue URL was found and is valid - nothing to do
+          if [[ "$existing_issue_url" == "https://github.com/$OTHER_REPO/issues/"* ]]; then
+            existing_issue_number="${existing_issue_url##*/}"
+            if [[ "$existing_issue_number" =~ ^[0-9]+$ ]]; then
+              exit 0
+            fi
+          fi
+          
+          existing_issue_url=""
+
+          # Recover from a possible partial run - look for an existing issue
+          existing_issue_url=$(
+            gh issue list \
+              --repo "$OTHER_REPO" \
+              --state all \
+              --search "\"Original issue: $THIS_ISSUE_URL\" in:body" \
+              --json url \
+              --jq '.[0].url // empty'
+          )
+
+          # Create the mirror only when neither check found an existing one.
+          if [[ -z "$existing_issue_url" ]]; then
+            issue_body=$(printf '%s\n\n---\nOriginal issue: %s' "$THIS_ISSUE_BODY" "$THIS_ISSUE_URL")
+            existing_issue_url=$(
+              gh issue create \
+                --title "$THIS_ISSUE_TITLE" \
+                --label "$LABELS" \
+                --body "$issue_body" \
+                --repo "$OTHER_REPO"
+            )
+          fi
+
+          # Record the mirror URL on the source issue and close it.
+          gh issue close \
+            --repo "$THIS_REPO" \
+            --comment "Mirrored to main repository! $existing_issue_url" \
+            "$THIS_ISSUE"
